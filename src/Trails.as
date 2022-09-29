@@ -2,6 +2,10 @@
 bool Setting_DrawTrails = false;
 [Setting category="Trails" description="Draws 4 lines per car instead of 1. 4x the load."]
 bool Setting_Draw4Wheels = false;
+[Setting category="Trails" description="Include Ghosts?"]
+bool Setting_IncludeGhosts = false;
+[Setting category="Trails" description="Do not draw trails for your own car?"]
+bool Setting_ExcludePlayer = true;
 [Setting hidden]
 uint TrailPointsLength = 1000;
 [Setting category="Trails" min="1" max="300" description="1 point per frame. Lower = shorter trails but less processing."];
@@ -30,14 +34,11 @@ class PlayerTrail {
         path.Resize(TrailPointsLength);
         dirs.Resize(TrailPointsLength);
         lefts.Resize(TrailPointsLength);
-        // print(path.Length);
-        // col = _col;
         if (_col.LengthSquared() > 0) col = _col;
         else col = RandVec4Color();
     }
     void AddPoint(vec3 &in p, vec3 &in dir, vec3 &in left) {
         pathIx = (pathIx + 1) % TrailPointsLength;
-        // print(pathIx + " / " + path.Length);
         path[pathIx] = p;
         dirs[pathIx] = dir;
         lefts[pathIx] = left;

@@ -1,10 +1,9 @@
 [meta]
-name     = "Race Stats"
+name     = "Player Trails"
 author   = "XertroV"
-category = "MLHook"
+category = "Race"
 version  = "0.1.0"
 
 [script]
 #__DEFINES__
-# dependencies = ["MLHook", "VehicleState"]
-dependencies = ["MLHook", "Camera", "VehicleState"]
+dependencies = ["Camera", "VehicleState"]
