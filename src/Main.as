@@ -9,16 +9,6 @@ void Update(float dt) {
         DrawPlayers();
 }
 
-// void RenderInterface() {
-//     if (!g_windowVisible) return;
-//     UI::PushFont(subheadingFont);
-//     if (UI::Begin("Race Stats", g_windowVisible, UI::WindowFlags::NoCollapse)) { // UI::WindowFlags::AlwaysAutoResize |
-//         DrawMainInterior();
-//     }
-//     UI::End();
-//     UI::PopFont();
-// }
-
 void RenderMenu() {
     if (UI::MenuItem("\\$d8f" + Icons::LongArrowRight + Icons::LongArrowRight + Icons::Kenney::Car + "\\$z Player Trails", "", Setting_DrawTrails)) {
         Setting_DrawTrails = !Setting_DrawTrails;
@@ -87,8 +77,6 @@ string get_LocalUserName() {
     return _localUserName;
 }
 
-
-#if DEV
 dictionary@ trails = dictionary();
 dictionary@ visLookup = dictionary();
 
@@ -165,5 +153,3 @@ void DrawPlayerIndicatorAt(vec2 uv) {
     nvg::FillColor(vec4(.99, .2, .92, .5));
     nvg::Fill();
 }
-
-#endif

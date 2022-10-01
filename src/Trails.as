@@ -7,7 +7,7 @@ bool Setting_IncludeGhosts = false;
 [Setting category="Trails" description="Do not draw trails for your own car?"]
 bool Setting_ExcludePlayer = true;
 [Setting hidden]
-uint TrailPointsLength = 1000;
+uint TrailPointsLength = 300;
 [Setting category="Trails" min="1" max="300" description="1 point per frame. Lower = shorter trails but less processing."];
 uint TrailPointsToDraw = 10;
 [Setting category="Trails" min="1" max="20" description="Thickness of trails in px"]
