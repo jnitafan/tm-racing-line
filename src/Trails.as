@@ -19,15 +19,14 @@ uint TrailPointsToDraw = 10;
 [Setting category="Trails" name="Trail thickness (px)" min="1" max="20" description="Thickness of trails in px"]
 uint TrailThickness = 3;
 
-// todo: impl settings
-
 [Setting category="Trails" name="Dynamic Thickness" description="Draw trails with a dynamic thickness? Constant: disabled. DistanceToCamera: thicker when closer to the camera (perspective). DistanceToCar: thicker when closer to the car. CombinedDistances: scale both by distance to camera then distance to car. Performance impact: ~5-15% more load."]
 DynThickness Setting_DynamicThickness = DynThickness::Constant;
 
+[Setting category="Trails" name="Dynamic Thickness N Segments" min="10" max="100" description="Thickness will have this many total segments. Higher -> more segments -> smoother lines. Only effective if Dynamic Thickness non-constant."]
+uint DynamicThicknessSegments = 20;
+
 [Setting category="Trails" name="Dynamic Thickness Modifier" min="0.25" max="4" description="Adjusts the dynamicness of the thickness. Only effective if Dynamic Thickness non-constant."]
 float DynamicThicknessMod = 1.0;
-
-// todo
 
 // ! Note: ensure that: ((1 + max of SkipNPoints) * max of TrailPointsToDraw) <= TrailPointsLength
 [Setting category="Trails" name="Skip N Points" min="0" max="9" description="Number of points to skip when drawing a trail. This increases performance relative to trail length but may cause artifacting.           Skip 0: draw all points (default).                                                                                     Skip 1: draw every 2nd point; 2x as long.                                    Skip 2: draw every 3rd point; 3x as long."]
@@ -36,13 +35,13 @@ uint SkipNPoints = 0;
 [Setting category="Trails" name="Path Skip Stabilization" description="When skipping points, always draw the same points in each path, rather than letting the path move 'through' the points. Works best with dynamic thickness."]
 bool Setting_PathSkipStable = true;
 
+
 enum DynThickness {
     Constant = 0,
     DistanceToCamera = 1,
     DistanceToCar = 2,
     CombinedDistances = 3
 }
-
 
 
 vec4 RandVec4Color() {
@@ -53,6 +52,7 @@ vec4 RandVec4Color() {
         Math::Rand(.35, .45)
     );
 }
+
 
 class PlayerTrail {
     array<vec3> path;
@@ -87,7 +87,7 @@ class PlayerTrail {
         // uint pointIndexLimit = TrailPointsToDraw * (1 + SkipNPoints);
         iso4 cameraLoc = Camera::GetCurrent().Location;
         vec3 cameraPos = vec3(cameraLoc.tx, cameraLoc.ty, cameraLoc.tz);
-        uint thicknessChangeF = Math::Max(1, TrailPointsToDraw / 10);
+        uint thicknessChangeF = Math::Max(1, TrailPointsToDraw / DynamicThicknessSegments);
         float sw = float(TrailThickness); // Stroke Width
         for (float lr = initLR; lr <= 1; lr += 2) {
             for (float dSign = initDSign; dSign <= 1.01; dSign += 1.7) {
