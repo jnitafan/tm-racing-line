@@ -13,3 +13,4 @@ License: Public Domain
 Authors: Magisterex
 
 ![Screenshot, TOTD: 21/06/25](./screenshots/Arunvale%20ft'%20iFendar%20by%20Arien.wp.png)
+Screenshot, TOTD: 21/06/25, Arunvale ft' iFendar by Arien.wp
