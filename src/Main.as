@@ -1,144 +1,61 @@
 //Main.as
-#if DEPENDENCY_MLHOOK
+enum Cmp {Lt = -1, Eq = 0, Gt = 1}
 
-NadeoApi@ g_api;
-FastestGhost@ g_fastestGhost;
-bool g_PluginVisible = true;
-string lastMap = "";
-bool g_mapSwitched = false;
+[Setting category="General" name="Draw Ghost End Trails" description="Show trails for ghosts"]
+bool Setting_DrawGhostEndTrails = true;
+
+[Setting category="General" name="Auto Render Lines" description="Automatically render ghost lines when map changes"]
+bool Setting_AutoRenderLines = true;
+
+[Setting category="General" name="Trail Length" description="Number of trail points to keep" min=10 max=1000]
+uint Setting_TrailLength = 200;
+
+[Setting category="General" name="Permanent Trails" description="Keep trails permanently on screen"]
+bool Setting_PermanentTrails = true;
 
 void Main() {
-    if (!canRaceGhostsCheck()) {
-        return;
-    }
-    @g_api = NadeoApi();
-    @g_fastestGhost = FastestGhost();
     startnew(MainCoro);
 }
 
 void Update(float dt) {
-    if (Setting_DrawTrails && g_fastestGhost !is null && g_fastestGhost.ghost.enabled) {
-        DrawFastestGhost();
+    if (Setting_DrawGhostEndTrails) {
+        DrawGhostEndTrails();
     }
 }
 
 void RenderMenu() {
-    if (UI::MenuItem("\\$f84" + Icons::Trophy + Icons::LongArrowRight + "\\$z Fastest Ghost Trail", "", g_PluginVisible)) {
-        g_PluginVisible = !g_PluginVisible;
+    if (UI::MenuItem("\\$d8f" + Icons::LongArrowRight + Icons::LongArrowRight + Icons::Kenney::Car + "\\$z Ghost End Trails", "", Setting_DrawGhostEndTrails)) {
+        Setting_DrawGhostEndTrails = !Setting_DrawGhostEndTrails;
+    }
+    
+    if (UI::MenuItem("\\$fa4" + Icons::FastForward + "\\$z Render Ghost Lines")) {
+        RenderGhostLines();
+    }
+    
+    if (UI::MenuItem("\\$4af" + Icons::Play + "\\$z Resume Ghost Playback")) {
+        ResumeGhostPlayback();
+    }
+    
+    if (UI::MenuItem("\\$f44" + Icons::Trash + "\\$z Clear All Trails")) {
+        ClearAllTrails();
     }
 }
 
-void RenderInterface() {
-    int windowFlags = UI::WindowFlags::NoTitleBar | UI::WindowFlags::NoCollapse | UI::WindowFlags::AlwaysAutoResize | UI::WindowFlags::NoDocking;
-    if (!UI::IsOverlayShown()) {
-        windowFlags |= UI::WindowFlags::NoInputs;
-    }
-
-    if (UI::IsOverlayShown() && inMap() && g_PluginVisible) {
-        UI::Begin("Fastest Ghost Trail", windowFlags);
-        
-        if (GetApp().PlaygroundScript is null) {
-            UI::Text(Meta::ExecutingPlugin().Name + " only works in Solo modes.");
-            UI::End();
-            return;
-        }
-
-        UI::BeginGroup();
-        UI::Text("\\$f84" + Icons::Trophy + " Fastest Ghost Trail");
-        UI::Separator();
-        
-        if (g_fastestGhost !is null) {
-            if (g_fastestGhost.loading) {
-                UI::Text(Icons::Spinner + " Loading fastest ghost...");
-            } else if (g_fastestGhost.error) {
-                UI::Text("\\$f00" + Icons::Times + " Failed to load fastest ghost");
-                if (UI::Button("Retry")) {
-                    g_fastestGhost.LoadFastestGhost();
-                }
-            } else if (g_fastestGhost.Username.Length > 0) {
-                UI::Text("Player: " + (g_fastestGhost.ghost.enabled ? "\\$0f0" : "") + g_fastestGhost.Username);
-                UI::Text("Time: " + MsToSeconds(g_fastestGhost.Time));
-                
-                if (g_fastestGhost.ghost.enabling) {
-                    UI::Text(Icons::Spinner + " Adding ghost...");
-                } else if (g_fastestGhost.ghost.error) {
-                    UI::Text("\\$f00" + Icons::Times + " Ghost not available");
-                } else {
-                    bool ghostEnabled = g_fastestGhost.ghost.enabled;
-                    if (UI::Checkbox("Enable Ghost & Trail", ghostEnabled)) {
-                        g_fastestGhost.ghost.checkbox_clicked = ghostEnabled;
-                        g_mapSwitched = false;
-                    }
-                }
-                
-                if (UI::Button("Spectate")) {
-                    g_fastestGhost.ghost.Spectate();
-                }
-            } else {
-                UI::Text("No ghost data available for this map");
-            }
-        }
-        
-        UI::Separator();
-        UI::TextWrapped("This plugin automatically loads the fastest ghost for the current map and draws a trail behind it.");
-        
-        UI::EndGroup();
-        UI::End();
-    }
+const string MsToSeconds(int t) {
+    return Text::Format("%.3f", float(t) / 1000.0);
 }
 
-void Render() {
-    if (!canRaceGhostsCheck()) {
-        return;
-    }
-
-    if (!inMap()) {
-        g_mapSwitched = true;
-        if (g_fastestGhost !is null) {
-            g_fastestGhost.ghost.reset();
-        }
-    } else if (!g_mapSwitched && g_fastestGhost !is null) {
-        CGameManiaAppPlayground@ playground = GetApp().Network.ClientManiaAppPlayground;
-        
-        // Handle ghost enabling/disabling
-        if (g_fastestGhost.ghost.checkbox_clicked != g_fastestGhost.ghost.enabled) {
-            if (!g_fastestGhost.ghost.enabled) {
-                print("Adding fastest ghost: " + g_fastestGhost.Username);
-                g_fastestGhost.ghost.enabling = true;
-                g_fastestGhost.ghost.Enable();
-            } else {
-                print("Disabling fastest ghost: " + g_fastestGhost.Username);
-                g_fastestGhost.ghost.Disable();
-            }
-        }
-        
-        // Check if ghost exists in playground
-        bool ghost_exists = false;
-        for (uint j = 0; j < playground.DataFileMgr.Ghosts.Length; ++j) {
-            if (playground.DataFileMgr.Ghosts[j].Nickname == g_fastestGhost.Username) {
-                g_fastestGhost.ghost.MwId = playground.DataFileMgr.Ghosts[j].Id;
-                ghost_exists = true;
-                break;
-            }
-        }
-        
-        if (ghost_exists) {
-            g_fastestGhost.ghost.enabling = false;
-            g_fastestGhost.ghost.enabled = true;
-            g_fastestGhost.ghost.timeout = 0;
-        } else {
-            if (g_fastestGhost.ghost.enabling) {
-                g_fastestGhost.ghost.timeout++;
-                if (g_fastestGhost.ghost.timeout >= 1000) {
-                    g_fastestGhost.ghost.enabling = false;
-                    g_fastestGhost.ghost.error = true;
-                    g_fastestGhost.ghost.timeout = 0;
-                }
-            }
-            g_fastestGhost.ghost.enabled = false;
-        }
-    }
+CTrackMania@ get_app() {
+    return cast<CTrackMania>(GetApp());
 }
+
+CGameManiaAppPlayground@ get_cmap() {
+    return app.Network.ClientManiaAppPlayground;
+}
+
+string lastMap = "";
+bool ghostsRendering = false;
+bool ghostsRendered = false;
 
 void MainCoro() {
     while (true) {
@@ -151,11 +68,22 @@ void MainCoro() {
 }
 
 void OnMapChange() {
-    if (g_fastestGhost !is null) {
-        g_fastestGhost.trail.DeleteAll();
-        g_fastestGhost.ghost.reset();
-        g_fastestGhost.LoadFastestGhost();
+    if (!Setting_PermanentTrails) {
+        ghostTrails.DeleteAll();
+        visLookup.DeleteAll();
     }
+    ghostsRendering = false;
+    ghostsRendered = false;
+    
+    if (Setting_AutoRenderLines) {
+        // Wait a bit for ghosts to load
+        startnew(DelayedGhostRender);
+    }
+}
+
+void DelayedGhostRender() {
+    sleep(2000); // Wait 2 seconds for ghosts to load
+    RenderGhostLines();
 }
 
 string get_CurrentMap() {
@@ -164,296 +92,280 @@ string get_CurrentMap() {
     return map.MapInfo.MapUid;
 }
 
-void DrawFastestGhost() {
+string _localUserLogin;
+string get_LocalUserLogin() {
+    if (_localUserLogin.Length == 0) {
+        auto pcsa = GetApp().Network.PlaygroundClientScriptAPI;
+        if (pcsa !is null && pcsa.LocalUser !is null) {
+            _localUserLogin = pcsa.LocalUser.Login;
+        }
+    }
+    return _localUserLogin;
+}
+
+string _localUserName;
+string get_LocalUserName() {
+    if (_localUserName.Length == 0) {
+        auto pcsa = GetApp().Network.PlaygroundClientScriptAPI;
+        if (pcsa !is null && pcsa.LocalUser !is null) {
+            _localUserName = pcsa.LocalUser.Name;
+        }
+    }
+    return _localUserName;
+}
+
+dictionary@ ghostTrails = dictionary();
+dictionary@ visLookup = dictionary();
+
+void RenderGhostLines() {
+    auto mgr = GhostClipsMgr::Get(cast<CGameCtnApp>(GetApp()));
+    if (mgr is null) {
+        print("No ghost clips manager found");
+        return;
+    }
+    
+    if (mgr.Ghosts.Length == 0) {
+        print("No ghosts loaded");
+        return;
+    }
+    
+    // Get the maximum ghost duration
+    uint maxDuration = GhostClipsMgr::GetMaxGhostDuration(mgr);
+    if (maxDuration == 0) {
+        print("No valid ghost duration found");
+        return;
+    }
+    
+    print("Rendering lines for " + mgr.Ghosts.Length + " ghosts (duration: " + MsToSeconds(maxDuration) + ")");
+    
+    // Start the rendering process
+    ghostsRendering = true;
+    ghostsRendered = false;
+    
+    // Only clear trails if not permanent
+    if (!Setting_PermanentTrails) {
+        ghostTrails.DeleteAll();
+        visLookup.DeleteAll();
+    }
+    
+    // Start the rendering coroutine
+    startnew(RenderGhostLinesCoroutine);
+}
+
+void RenderGhostLinesCoroutine() {
+    auto mgr = GhostClipsMgr::Get(cast<CGameCtnApp>(GetApp()));
+    if (mgr is null) {
+        ghostsRendering = false;
+        return;
+    }
+    
+    uint maxDuration = GhostClipsMgr::GetMaxGhostDuration(mgr);
+    if (maxDuration == 0) {
+        ghostsRendering = false;
+        return;
+    }
+    
+    // Reset ghosts to start
+    GhostClipsMgr::UnpauseClipPlayers(mgr, 0.0, float(maxDuration) / 1000.0);
+    
+    uint startTime = Time::Now;
+    uint lastUpdate = startTime;
+    
+    // Play ghosts at double speed until completion
+    while (ghostsRendering) {
+        uint currentTime = Time::Now;
+        float deltaTime = float(currentTime - lastUpdate) / 1000.0;
+        lastUpdate = currentTime;
+        
+        // Advance clip players by delta at double speed
+        auto result = GhostClipsMgr::AdvanceClipPlayersByDelta(mgr, 2.0);
+        
+        // Check if we've reached the end
+        float currentGhostTime = result.x;
+        float totalTime = float(maxDuration) / 1000.0;
+        
+        if (currentGhostTime >= totalTime) {
+            break;
+        }
+        
+        sleep(16); // ~60 FPS rendering
+    }
+    
+    // Pause ghosts at the end
+    GhostClipsMgr::PauseClipPlayers(mgr, float(maxDuration) / 1000.0);
+    
+    ghostsRendering = false;
+    ghostsRendered = true;
+    
+    print("Ghost lines rendered successfully!");
+}
+
+void ResumeGhostPlayback() {
+    auto mgr = GhostClipsMgr::Get(cast<CGameCtnApp>(GetApp()));
+    if (mgr is null) return;
+    
+    uint maxDuration = GhostClipsMgr::GetMaxGhostDuration(mgr);
+    if (maxDuration == 0) return;
+    
+    float totalTime = float(maxDuration) / 1000.0;
+    GhostClipsMgr::UnpauseClipPlayers(mgr, 0.0, totalTime);
+    
+    ghostsRendering = false;
+    ghostsRendered = false;
+    print("Resumed ghost playback");
+}
+
+void ClearAllTrails() {
+    ghostTrails.DeleteAll();
+    visLookup.DeleteAll();
+    print("Cleared all trails");
+}
+
+void DrawGhostEndTrails() {
     auto cpg = cast<CSmArenaClient>(GetApp().CurrentPlayground);
     if (cpg is null) return;
     auto scene = cpg.GameScene;
+    if (scene is null) return;
     
-    // Find the fastest ghost among all vehicles
+    // Get all vehicle visualizations (includes ghosts)
     auto allVis = VehicleState::GetAllVis(scene);
     for (uint i = 0; i < allVis.Length; i++) {
         auto vis = allVis[i];
-        // Check if this is our fastest ghost by comparing some identifier
-        // Since we can't directly match, we'll draw trail for the first ghost we find
-        // This assumes the fastest ghost is the one we loaded
-        if (g_fastestGhost.ghost.enabled) {
-            g_fastestGhost.trail.AddPoint(vis.AsyncState.Position, vis.AsyncState.Dir, vis.AsyncState.Left);
-            g_fastestGhost.trail.DrawPath();
-            break; // Only draw for the first ghost (assumed to be ours)
-        }
-    }
-}
-
-CTrackMania@ get_app() {
-    return cast<CTrackMania>(GetApp());
-}
-
-const string MsToSeconds(int t) {
-    return Text::Format("%.3f", float(t) / 1000.0);
-}
-
-// Trail Settings
-[Setting category="Fastest Ghost Trail" name="Enable trails" description="Draw trail behind the fastest ghost."]
-bool Setting_DrawTrails = true;
-
-[Setting category="Fastest Ghost Trail" name="Trail thickness (px)" min="1" max="20" description="Thickness of trails in px"]
-uint TrailThickness = 4;
-
-[Setting category="Fastest Ghost Trail" name="Points to draw per-trail" min="10" max="200" description="Number of points to draw for the trail."]
-uint TrailPointsToDraw = 50;
-
-[Setting hidden]
-uint TrailPointsLength = 2000;
-
-// FastestGhost.as
-class FastestGhost {
-    string Username = "";
-    string WsId = "";
-    int Time = 0;
-    bool loading = false;
-    bool error = false;
-    Ghost@ ghost;
-    PlayerTrail@ trail;
-    
-    FastestGhost() {
-        @ghost = Ghost();
-        @trail = PlayerTrail(vec4(1.0, 0.8, 0.0, 0.6)); // Golden trail for fastest ghost
-    }
-    
-    void LoadFastestGhost() {
-        if (CurrentMap.Length == 0) return;
+        if (vis is null) continue;
         
-        loading = true;
-        error = false;
-        startnew(CoroutineFunc(this.GetFastestGhostFromAPI));
-    }
-    
-    void GetFastestGhostFromAPI() {
-        try {
-            string mapUid = CurrentMap;
-            if (mapUid.Length == 0) {
-                error = true;
-                loading = false;
-                return;
-            }
-            
-            // Get map leaderboard from Nadeo API
-            string url = "https://prod.trackmania.core.nadeo.online/api/token/leaderboard/group/Personal_Best/map/" + mapUid + "/top?length=1&offset=0";
-            
-            Net::HttpRequest@ req = Net::HttpGet(url);
-            while (!req.Finished()) {
-                yield();
-            }
-            
-            if (req.ResponseCode() != 200) {
-                print("Failed to get leaderboard: " + req.ResponseCode());
-                error = true;
-                loading = false;
-                return;
-            }
-            
-            Json::Value response = Json::Parse(req.String());
-            if (response.GetType() != Json::Type::Object || !response.HasKey("tops")) {
-                error = true;
-                loading = false;
-                return;
-            }
-            
-            Json::Value tops = response["tops"];
-            if (tops.GetType() != Json::Type::Array || tops.Length == 0) {
-                error = true;
-                loading = false;
-                return;
-            }
-            
-            Json::Value leaderboard = tops[0];
-            if (!leaderboard.HasKey("top") || leaderboard["top"].Length == 0) {
-                error = true;
-                loading = false;
-                return;
-            }
-            
-            Json::Value topRecord = leaderboard["top"][0];
-            Username = topRecord["accountId"];
-            Time = topRecord["score"];
-            
-            // Get display name
-            startnew(CoroutineFunc(this.GetDisplayName));
-            
-        } catch {
-            print("Exception in GetFastestGhostFromAPI");
-            error = true;
-            loading = false;
-        }
-    }
-    
-    void GetDisplayName() {
-        try {
-            string url = "https://prod.trackmania.core.nadeo.online/api/token/account/" + Username;
-            
-            Net::HttpRequest@ req = Net::HttpGet(url);
-            while (!req.Finished()) {
-                yield();
-            }
-            
-            if (req.ResponseCode() == 200) {
-                Json::Value response = Json::Parse(req.String());
-                if (response.HasKey("displayName")) {
-                    Username = response["displayName"];
+        // Skip player's own vehicle by checking if this is a live player
+        bool isPlayerVehicle = false;
+        if (cpg.Players.Length > 0) {
+            for (uint j = 0; j < cpg.Players.Length; j++) {
+                auto player = cast<CSmPlayer>(cpg.Players[j]);
+                if (player !is null && player.User.Login == LocalUserLogin) {
+                    auto playerVis = VehicleState::GetVis(scene, player);
+                    if (playerVis is vis) {
+                        isPlayerVehicle = true;
+                        break;
+                    }
                 }
             }
-            
-            loading = false;
-            
-        } catch {
-            print("Exception in GetDisplayName");
-            loading = false;
+        }
+        
+        // Skip drawing trail for player's vehicle
+        if (isPlayerVehicle) continue;
+        
+        string key = 'ghost-' + i;
+        auto trail = cast<PlayerTrail>(ghostTrails[key]);
+        if (trail is null) {
+            @trail = PlayerTrail();
+            @ghostTrails[key] = trail;
+        }
+        
+        // Add current position to trail only when rendering or if permanent trails and not rendered yet
+        if (ghostsRendering || (Setting_PermanentTrails && !ghostsRendered)) {
+            trail.AddPoint(vis.AsyncState.Position, vis.AsyncState.Dir, vis.AsyncState.Left);
+        }
+        
+        // Limit trail length only if not permanent trails
+        if (!Setting_PermanentTrails) {
+            trail.LimitLength(Setting_TrailLength);
+        }
+        
+        // Always draw existing trails
+        trail.DrawPath();
+        
+        // Draw indicator for ghost position only when rendered and paused
+        if (ghostsRendered && !ghostsRendering) {
+            DrawGhostIndicator(vis.AsyncState);
         }
     }
 }
 
-// Ghost.as (simplified version of the ghost management from your second snippet)
-class Ghost {
-    string MwId;
-    bool enabled = false;
-    bool enabling = false;
-    bool error = false;
-    bool checkbox_clicked = false;
-    uint timeout = 0;
-    string rank = "-";
+void DrawGhostIndicator(CSceneVehicleVisState@ vis) {
+    if (Camera::IsBehind(vis.Position)) return;
+    auto uv = Camera::ToScreenSpace(vis.Position);
     
-    void Enable() {
-        // Implementation would depend on MLHook specifics
-        // This is a placeholder for the actual ghost enabling logic
-    }
-    
-    void Disable() {
-        CGameManiaAppPlayground@ playground = GetApp().Network.ClientManiaAppPlayground;
-        if (playground !is null) {
-            for (uint i = 0; i < playground.DataFileMgr.Ghosts.Length; ++i) {
-                if (playground.DataFileMgr.Ghosts[i].Id.Value == MwId) {
-                    playground.DataFileMgr.Ghosts[i].IsVisible = false;
-                    break;
-                }
-            }
-        }
-        enabled = false;
-    }
-    
-    void Spectate() {
-        // Implementation for spectating the ghost
-    }
-    
-    void reset() {
-        if (enabled) {
-            Disable();
-        }
-        enabled = false;
-        enabling = false;
-        error = false;
-        checkbox_clicked = false;
-        timeout = 0;
-        rank = "-";
-    }
-    
-    void getRank() {
-        // Implementation for getting rank
-    }
+    // Use a distinct color for ghost end positions
+    vec4 col = vec4(1.0, 0.8, 0.2, 0.8); // Golden color for ghost end positions
+    DrawGhostIndicatorAt(uv, col);
 }
 
-// PlayerTrail.as (adapted from your first snippet)
+void DrawGhostIndicatorAt(vec2 uv, vec4 col) {
+    nvg::BeginPath();
+    nvg::RoundedRect(uv - vec2(25, 25)/2, vec2(25, 25), 6);
+    nvg::FillColor(col);
+    nvg::Fill();
+    
+    // Add a border to make it more visible
+    nvg::StrokeWidth(2);
+    nvg::StrokeColor(vec4(0.2, 0.2, 0.2, 0.8));
+    nvg::Stroke();
+    nvg::ClosePath();
+}
+
+//PlayerTrail.as - Enhanced version for ghost trails
 class PlayerTrail {
-    array<vec3> path;
-    array<vec3> dirs;
+    array<vec3> positions;
+    array<vec3> directions;
     array<vec3> lefts;
-    uint pathIx = 0;
-    vec4 col;
+    uint maxPoints = 200;
     
-    PlayerTrail(vec4 &in _col = vec4()) {
-        path.Reserve(TrailPointsLength);
-        path.Resize(TrailPointsLength);
-        dirs.Resize(TrailPointsLength);
-        lefts.Resize(TrailPointsLength);
-        if (_col.LengthSquared() > 0) col = _col;
-        else col = vec4(1.0, 0.8, 0.0, 0.6); // Default golden color
+    void AddPoint(vec3 pos, vec3 dir, vec3 left) {
+        positions.InsertLast(pos);
+        directions.InsertLast(dir);
+        lefts.InsertLast(left);
+        
+        // Only remove old points if permanent trails is disabled
+        if (!Setting_PermanentTrails) {
+            while (positions.Length > maxPoints) {
+                positions.RemoveAt(0);
+                directions.RemoveAt(0);
+                lefts.RemoveAt(0);
+            }
+        }
     }
     
-    void AddPoint(vec3 &in p, vec3 &in dir, vec3 &in left) {
-        pathIx = (pathIx + 1) % TrailPointsLength;
-        path[pathIx] = p;
-        dirs[pathIx] = dir;
-        lefts[pathIx] = left;
+    void LimitLength(uint newMaxPoints) {
+        maxPoints = newMaxPoints;
+        if (!Setting_PermanentTrails) {
+            while (positions.Length > maxPoints) {
+                positions.RemoveAt(0);
+                directions.RemoveAt(0);
+                lefts.RemoveAt(0);
+            }
+        }
     }
     
     void DrawPath() {
-        nvg::Reset();
-        nvg::LineCap(nvg::LineCapType::Round);
-        nvg::StrokeColor(col);
-        nvg::StrokeWidth(TrailThickness);
+        if (positions.Length < 2) return;
         
-        nvg::BeginPath();
-        vec3 p;
-        vec2 pUv;
-        bool firstPoint = true;
-        
-        for (uint i = 0; i < TrailPointsToDraw; i++) {
-            uint _ix = (pathIx - i + TrailPointsLength) % TrailPointsLength;
-            p = path[_ix];
+        for (uint i = 1; i < positions.Length; i++) {
+            float alpha = float(i) / float(positions.Length);
+            vec4 color = vec4(1.0, 0.8 * alpha, 0.2 * alpha, 0.6 * alpha);
             
-            if (p.LengthSquared() == 0) continue;
+            vec3 start = positions[i-1];
+            vec3 end = positions[i];
             
-            try {
-                if (Camera::IsBehind(p)) break;
-                pUv = Camera::ToScreenSpace(p);
-                
-                if (firstPoint) {
-                    nvg::MoveTo(pUv);
-                    firstPoint = false;
-                } else {
-                    nvg::LineTo(pUv);
-                }
-            } catch {
-                continue;
+            // Skip if points are too close or too far apart (likely teleport)
+            float distance = Math::Distance(start, end);
+            if (distance < 0.1 || distance > 50.0) continue;
+            
+            // Draw line between consecutive points
+            nvg::BeginPath();
+            auto startUV = Camera::ToScreenSpace(start);
+            auto endUV = Camera::ToScreenSpace(end);
+            
+            if (!Camera::IsBehind(start) && !Camera::IsBehind(end)) {
+                nvg::MoveTo(startUV);
+                nvg::LineTo(endUV);
+                nvg::StrokeWidth(3.0 * alpha + 1.0);
+                nvg::StrokeColor(color);
+                nvg::Stroke();
             }
+            nvg::ClosePath();
         }
-        
-        nvg::Stroke();
-        nvg::ClosePath();
     }
     
-    void DeleteAll() {
-        for (uint i = 0; i < path.Length; i++) {
-            path[i] = vec3();
-            dirs[i] = vec3();
-            lefts[i] = vec3();
-        }
-        pathIx = 0;
+    void Clear() {
+        positions.RemoveRange(0, positions.Length);
+        directions.RemoveRange(0, directions.Length);
+        lefts.RemoveRange(0, lefts.Length);
     }
 }
-
-// Helper functions (you'll need to implement these based on your existing code)
-bool canRaceGhostsCheck() {
-    // Implementation to check if user can race against ghosts
-    return true; // Placeholder
-}
-
-bool inMap() {
-    auto map = GetApp().RootMap;
-    return map !is null;
-}
-
-// NadeoApi class (placeholder - you'll need to implement authentication)
-class NadeoApi {
-    // Implementation for Nadeo API authentication and requests
-}
-
-#else
-void Main() {
-    UI::ShowNotification(
-        "Fastest Ghost Trail Plugin Error",
-        "This plugin depends on the plugin MLHook.\nPlease install \\$000 MLHook \\$z from the Plugin Manager",
-        vec4(1, 0.5, 0.2, 0),
-        10000
-    );
-}
-#endif

@@ -1,0 +1,383 @@
+// Thank you Xertrov, before reading your code I once considered myself as a developer. Code taken from ghosts-pp.
+
+NGameGhostClips_SMgr@ GetGhostClipsMgr(CGameCtnApp@ app) {
+    if (app.GameScene is null) return null;
+    auto nod = Dev::GetOffsetNod(app.GameScene, 0x120);
+    if (nod is null) return null;
+    return Dev::ForceCast<NGameGhostClips_SMgr@>(nod).Get();
+}
+
+namespace GhostClipsMgr {
+    const uint16 GhostsOffset = GetOffset("NGameGhostClips_SMgr", "Ghosts");
+    const uint16 GhostInstIdsOffset = GhostsOffset + 0x10;
+
+    NGameGhostClips_SMgr@ Get(CGameCtnApp@ app) {
+        return GetGhostClipsMgr(app);
+    }
+
+    uint GetMaxGhostDuration(CGameCtnApp@ app) {
+        return GetMaxGhostDuration(GhostClipsMgr::Get(app));
+    }
+    uint GetMaxGhostDuration(NGameGhostClips_SMgr@ mgr) {
+        uint maxTime = 0;
+        for (uint i = 0; i < mgr.Ghosts.Length; i++) {
+            maxTime = Math::Max(mgr.Ghosts[i].GhostModel.RaceTime, maxTime);
+        }
+        return maxTime;
+    }
+
+    NGameGhostClips_SClipPlayerGhost@ Find(NGameGhostClips_SMgr@ mgr, uint32 entUid) {
+        for (uint i = 0; i < mgr.Ghosts.Length; i++) {
+            auto @pghost = mgr.Ghosts[i];
+            if (Dev::GetOffsetUint32(pghost, 0x0) == entUid) {
+                return pghost;
+            }
+        }
+        return null;
+    }
+
+    NGameGhostClips_SClipPlayerGhost@ Find(NGameGhostClips_SMgr@ mgr, const string &in loginOrName) {
+        for (uint i = 0; i < mgr.Ghosts.Length; i++) {
+            auto @pghost = mgr.Ghosts[i];
+            if (pghost.GhostModel.GhostLogin == loginOrName || pghost.GhostModel.GhostNickname == loginOrName) {
+                return pghost;
+            }
+        }
+        return null;
+    }
+
+    // matches index of .Ghosts
+    uint GetInstanceIdAtIx(NGameGhostClips_SMgr@ mgr, uint ix) {
+        if (mgr is null) return uint(-1);
+        auto bufOffset = GhostInstIdsOffset;
+        auto bufPtr = Dev::GetOffsetUint64(mgr, bufOffset);
+        auto nextIdOrSomething = Dev::GetOffsetUint32(mgr, bufOffset + 0x8);
+        auto bufLen = Dev::GetOffsetUint32(mgr, bufOffset + 0xC);
+        auto bufCapacity = Dev::GetOffsetUint32(mgr, bufOffset + 0x10);
+
+        if (bufLen == 0 || bufCapacity == 0) return uint(-1);
+
+        // A bunch of trial and error to figure this out >.<
+        if (bufLen <= ix) return uint(-1);
+        if (bufPtr == 0 or bufPtr % 8 != 0) return uint(-1);
+        auto slot = Dev::ReadUInt32(bufPtr + (bufCapacity*4) + ix * 4);
+        auto msb = Dev::ReadUInt32(bufPtr + slot * 4) & 0xFF000000;
+        return msb + slot;
+
+        // auto lsb = Dev::ReadUInt32(bufPtr + slot * 4) & 0x00FFFFFF;
+        // if (lsb >= bufCapacity) {
+        //     warn('lsb outside expected range: ' + lsb + " should be < " + bufCapacity);
+        // }
+        // auto msb = Dev::ReadUInt32(bufPtr + (bufCapacity*4*2) + slot * 4) & 0xFF000000;
+        // trace('msb: ' + msb);
+    }
+
+    NGameGhostClips_SClipPlayerGhost@ GetGhostFromInstanceId(NGameGhostClips_SMgr@ mgr, uint instanceId) {
+        auto lsb = instanceId & 0x000FFFFF;
+        auto bufOffset = GhostInstIdsOffset;
+        // auto bufPtr = Dev::GetOffsetUint64(mgr, bufOffset);
+        // auto nextIdOrSomething = Dev::GetOffsetUint32(mgr, bufOffset + 0x8);
+        // auto bufLen = Dev::GetOffsetUint32(mgr, bufOffset + 0xC);
+        auto bufCapacity = Dev::GetOffsetUint32(mgr, bufOffset + 0x10);
+        if (lsb > bufCapacity) {
+            warn('unexpectedly high ghost instance ID: ' + Text::Format("0x%08x", lsb));
+            return null;
+        }
+        for (uint i = 0; i < bufCapacity; i++) {
+            if (GetInstanceIdAtIx(mgr, i) == instanceId) {
+                return mgr.Ghosts[i];
+            }
+        }
+        return null;
+    }
+
+    // this is the result of the last call to Ghosts_SetStartTime
+    uint GetCurrentGhostTime(NGameGhostClips_SMgr@ mgr) {
+        if (mgr.Ghosts.Length == 0) return uint(-1);
+        auto clipPlayer = GetMainClipPlayer(mgr);
+        if (clipPlayer is null) {
+            @clipPlayer = GetPBClipPlayer(mgr);
+        }
+        if (clipPlayer is null) {
+            warn("no loaded ghosts");
+            return uint(-1);
+        }
+        // this nod is 0x350 bytes large => memory will always be allocated
+        return Dev::GetOffsetUint32(clipPlayer, O_GHOSTCLIPPLAYER_START_TIME);
+    }
+
+    void PauseClipPlayers(NGameGhostClips_SMgr@ mgr, float currTime) {
+        SetGhostClipPlayerPaused(GetMainClipPlayer(mgr), currTime);
+        SetGhostClipPlayerPaused(GetPBClipPlayer(mgr), currTime);
+    }
+
+    void UnpauseClipPlayers(NGameGhostClips_SMgr@ mgr, float currTime, float totalTime) {
+        SetGhostClipPlayerUnpaused(GetMainClipPlayer(mgr), currTime, totalTime);
+        SetGhostClipPlayerUnpaused(GetPBClipPlayer(mgr), currTime, totalTime);
+    }
+    // if total time is not provided, (!) then the current values are used. -- but it's set to -100 when pausing...
+    void UnpauseClipPlayers(NGameGhostClips_SMgr@ mgr, float currTime) {
+        auto tmp = GetMainClipPlayer(mgr);
+        if (tmp is null) @tmp = GetPBClipPlayer(mgr);
+        if (tmp is null) return;
+        auto totalTime = ClipPlayer_GetTotalTime(tmp);
+        if (totalTime < 0.0) totalTime = lastClipLength;
+        SetGhostClipPlayerUnpaused(GetMainClipPlayer(mgr), currTime, totalTime);
+        SetGhostClipPlayerUnpaused(GetPBClipPlayer(mgr), currTime, totalTime);
+    }
+
+    // void SetClipPlayersDeltaTime(NGameGhostClips_SMgr@ mgr, float deltaTime) {
+    //     SetGhostClipPlayerSmallDeltaTime(GetMainClipPlayer(mgr));
+    //     SetGhostClipPlayerSmallDeltaTime(GetPBClipPlayer(mgr));
+    // }
+
+    // all ghosts but 1 PB ghost, null if there are no ghosts
+    CGameCtnMediaClipPlayer@ GetMainClipPlayer(NGameGhostClips_SMgr@ mgr) {
+        return cast<CGameCtnMediaClipPlayer>(Dev::GetOffsetNod(mgr, 0x20));
+    }
+
+    // One ghost only, always PB (PBs can also be in the other clip player tho too). Can be null if you unload PB ghosts
+    CGameCtnMediaClipPlayer@ GetPBClipPlayer(NGameGhostClips_SMgr@ mgr) {
+        return cast<CGameCtnMediaClipPlayer>(Dev::GetOffsetNod(mgr, 0x40));
+    }
+
+    vec2 AdvanceClipPlayersByDelta(NGameGhostClips_SMgr@ mgr, float playbackSpeed = 1.0) {
+        auto ret = ClipPlayer_AdvanceByDelta(GetPBClipPlayer(mgr), playbackSpeed);
+        auto mainClip = GetMainClipPlayer(mgr);
+        if (mainClip !is null) {
+            ret = ClipPlayer_AdvanceByDelta(mainClip, playbackSpeed);
+        }
+        return ret;
+    }
+}
+
+// Utils for CGameCtnMediaClipPlayer
+
+float ClipPlayer_GetCurrSeconds(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_CURR_TIME);
+}
+
+float ClipPlayer_GetCurrSeconds2(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_CURR_TIME2);
+}
+
+float ClipPlayer_GetCurrSeconds3(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_CURR_TIME3);
+}
+
+void ClipPlayer_SetCurrSeconds(CGameCtnMediaClipPlayer@ player, float t) {
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME, t);
+}
+
+void ClipPlayer_SetCurrSeconds2(CGameCtnMediaClipPlayer@ player, float t) {
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME2, t);
+}
+
+void ClipPlayer_SetCurrSeconds3(CGameCtnMediaClipPlayer@ player, float t) {
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME3, t);
+}
+
+float ClipPlayer_GetFrameDelta(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_FRAME_DELTA);
+}
+
+float ClipPlayer_GetFrameDelta2(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_FRAME_DELTA2);
+}
+
+float ClipPlayer_GetTotalTime(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TOTAL_TIME);
+}
+
+uint ClipPlayer_GetStartTime(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetUint32(player, O_GHOSTCLIPPLAYER_START_TIME);
+}
+
+void ClipPlayer_SetStartTime(CGameCtnMediaClipPlayer@ player, uint t) {
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_START_TIME, t);
+}
+
+float ClipPlayer_GetTimeSpeed3(CGameCtnMediaClipPlayer@ player) {
+    return Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TIME_SPEED_3);
+}
+
+// returns vec2(time, delta)
+vec2 ClipPlayer_AdvanceByDelta(CGameCtnMediaClipPlayer@ player, float playbackSpeed = 1.0) {
+    if (player is null) return vec2();
+    auto d = ClipPlayer_GetFrameDelta(player) * playbackSpeed;
+    auto t = ClipPlayer_GetCurrSeconds(player) + d;
+    ClipPlayer_SetCurrSeconds(player, t);
+    return vec2(t, d);
+}
+
+
+// CGameCtnMediaClipPlayer
+
+// 0x50 - CgameCtnMediaBlockEntity
+// - CGameCtnInterfaceViewer
+// - CGameCtnMediaClip
+
+
+
+// 0x1ac - float time
+// 0x1b0 - some scaling thing? 1.0 normally
+// 0x1b8 - CPlugAudioBalance
+
+// 0x2f8 - CGameEditorMediaTrackerPluginAPI
+
+// 0x308 - CPlugAudiobalance
+
+// 0x310, delta?
+// 0x314, ?
+// 0x318 - time speed
+// 0x320 - ghost start time
+// 0x324 - flag 2?
+// 0x328 - CGameEditorMediaTracker
+
+  // set to 0 (1 does motion interpolation or something)
+// 0x328 - flag? (test rdx,rdx)
+// 0x330 - test
+// --- both above pass then
+// 0x338 - total len
+// 0x33c - time speed
+// 0x340 - time float
+// 0x348 - flag 1? (nonzero)
+  // set to 1? (invis if not f2 also 1)
+  // hides other ghosts?
+// 0x364 - apply custom time?
+// set 0x1b0 to -1?
+
+// load tiem speed, mov to xmm2, mulss x2 x0, mulss x2 0x1b0 (scaling), addss 0x340 (time)
+
+
+// set 338 to -100
+// set 324 to 0
+// set 348 to 1
+// set 1ac to set the position of the ghost
+// set 33c > 0
+
+// ! Game update 2023-11-21
+// size ? -> 840 or 0x348
+// 0x1AC -> 0x1A4
+// 0x308 -> 0x300 (Audio Balance)
+// expect: offsets to decrease by 0x8
+// ! 2024-01-10_12_53
+// size 840 -> 824 (0x338)
+// 0x1A4 stays the same
+// 0x330 -> 0x320
+// expect upper offsets to decrease by 0x10
+// ! 2024-02-26_11_36
+// size 824 -> 832
+// seems like +8 from early on
+// ! 2024-06-20_19_53
+// size 832 -> 840
+// +8 from after EdMediaTracks
+
+// Was 0x60 in 2024-01-10;
+const uint16 O_GHOSTCLIPPLAYER_EDMEDIATRACKS = GetOffset("CGameCtnMediaClipPlayer", "EdMediaTracks");
+// const int16 O_GCP_CONSTS_OFF = (O_GHOSTCLIPPLAYER_EDMEDIATRACKS - 0x60) + 0x8;
+// -0x60 for orig size. +8 for 2024-06-20_19_53 added values but before the stuff we care about
+
+string TmGameVersion = "";
+int16 _o_gcp_consts_off = 0;
+int16 O_GCP_CONSTS_OFF {
+    get {
+        if (_o_gcp_consts_off == 0) {
+            _o_gcp_consts_off = int16(O_GHOSTCLIPPLAYER_EDMEDIATRACKS) - 0x60;
+            if (TmGameVersion.Length == 0) TmGameVersion = GetApp().SystemPlatform.ExeVersion;
+            if (TmGameVersion >= "2024-06-20_19_53") {
+                _o_gcp_consts_off += 0x8;
+                warn("Adjusting GCP consts offset for version since >= 24-6-20: " + TmGameVersion + "; new offset: " + _o_gcp_consts_off);
+            } else {
+                warn(TmGameVersion + " is not >= 2024-06-20_19_53; using old offset: " + _o_gcp_consts_off);
+            }
+            warn("O_GHOSTCLIPPLAYER_CURR_TIME: " + Text::Format("0x%04x", O_GHOSTCLIPPLAYER_CURR_TIME));
+        }
+        return _o_gcp_consts_off;
+    }
+}
+
+// 2025 helper: O_GCP_CONSTS_OFF = 0x10.
+// main offsets we touch
+uint16 O_GHOSTCLIPPLAYER_CURR_TIME { get { return 0x1A4 + O_GCP_CONSTS_OFF; } }
+// the game calculates `delta t * this + currentTime3` (maybe position for future?)
+uint16 O_GHOSTCLIPPLAYER_DT_COEF_1A8 { get { return 0x1A8 + O_GCP_CONSTS_OFF; } }
+// not correctly labeled, something to do with this but not exactly as named
+uint16 O_GHOSTCLIPPLAYER_DO_MOTION_INTERP { get { return 0x30C + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_TOTAL_TIME { get { return 0x320 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_TIME_SPEED_3 { get { return 0x324 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_SMOOTH_PAUSE { get { return 0x330 + O_GCP_CONSTS_OFF; } }
+
+// other offsets
+uint16 O_GHOSTCLIPPLAYER_FRAME_DELTA { get { return 0x2F8 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_CURR_TIME2 { get { return 0x2FC + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_TIME_SPEED_1 { get { return 0x1A8 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_TIME_SPEED_2 { get { return 0x300 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_START_TIME { get { return 0x308 + O_GCP_CONSTS_OFF; } }
+// editing this toggles the play/pause button in MT but does not actually pause playback. maybe it is a flat like CanPause
+uint16 O_GHOSTCLIPPLAYER_IS_PLAYING { get { return 0x30C + O_GCP_CONSTS_OFF; } }
+// these needed for GPS scrubbing
+uint16 O_GHOSTCLIPPLAYER_CURR_TIME3 { get { return 0x328 + O_GCP_CONSTS_OFF; } }
+uint16 O_GHOSTCLIPPLAYER_FRAME_DELTA2 { get { return 0x32C + O_GCP_CONSTS_OFF; } }
+
+
+string[] GetGhostClipPlayerDebugValues(CGameCtnMediaClipPlayer@ player) {
+    if (player is null) return {"not found"};
+    float curTime = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_CURR_TIME);
+    float totalTime = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TOTAL_TIME);
+    uint8 doMotionInterp = Dev::GetOffsetUint32(player, O_GHOSTCLIPPLAYER_DO_MOTION_INTERP);
+    uint8 otherGhostsVisible = Dev::GetOffsetUint32(player, O_GHOSTCLIPPLAYER_SMOOTH_PAUSE);
+    float timeSpeed_33C = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TIME_SPEED_3);
+    float timeSpeed_318 = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TIME_SPEED_2);
+    float timeSpeed_1B0 = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TIME_SPEED_1);
+    float isPlayingFlag = Dev::GetOffsetUint32(player, O_GHOSTCLIPPLAYER_IS_PLAYING);
+    return {"totalTime:", tostring(totalTime), "curTime:", tostring(curTime), "doMotionInterp:", tostring(doMotionInterp), "otherGhostsVisible:", tostring(otherGhostsVisible), "1B0: " + timeSpeed_1B0, "318: " + timeSpeed_318, "33C: " + timeSpeed_33C, "CanPause:", tostring(isPlayingFlag)};
+}
+
+void SetGhostClipPlayerPaused(CGameCtnMediaClipPlayer@ player, float timestamp) {
+    if (player is null) return;
+    CacheLastClipLength(player);
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME, timestamp);
+    // also set curr time 3 b/c NoFlashCar patch doesn't always update it.
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME3, timestamp);
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_TOTAL_TIME, float(-100.0));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_DO_MOTION_INTERP, uint8(0));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_SMOOTH_PAUSE, uint8(1));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_TIME_SPEED_3, float(1.0));
+}
+
+float lastClipLength = 1.0;
+void CacheLastClipLength(CGameCtnMediaClipPlayer@ player) {
+    if (player is null) return;
+    auto _lastClipLength = Dev::GetOffsetFloat(player, O_GHOSTCLIPPLAYER_TOTAL_TIME);
+    if (_lastClipLength > 0.0) {
+        lastClipLength = _lastClipLength;
+    }
+}
+
+// void SetGhostClipPlayerSmallDeltaTime(CGameCtnMediaClipPlayer@ player) {
+//     Dev::SetOffset(player, O_GHOSTCLIPPLAYER_FRAME_DELTA, float(0.0001));
+//     Dev::SetOffset(player, O_GHOSTCLIPPLAYER_FRAME_DELTA2, float(0.0001));
+// }
+
+void SetGhostClipPlayerUnpaused(CGameCtnMediaClipPlayer@ player, float timestamp, float totalTime) {
+    if (player is null) return;
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME, timestamp);
+    // isn't always updated b/c of NoFlashCar patch, so set it if it matters.
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_CURR_TIME3, timestamp);
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_TOTAL_TIME, float(totalTime));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_DO_MOTION_INTERP, uint8(1));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_SMOOTH_PAUSE, uint8(1));
+    Dev::SetOffset(player, O_GHOSTCLIPPLAYER_TIME_SPEED_3, uint32(0));
+}
+
+// To get clip from EditorMediaTracker
+// offsets: 0x228, 0x80 (maybe 0x0 then?)
+
+
+// CGameCtnMediaBlockEntity
+// 0xB8: changes with skin
+
+CGameCtnGhost@ GetCtnGhost(CGameGhostScript@ ghost) {
+    return cast<CGameCtnGhost>(Dev::GetOffsetNod(ghost, 0x20));
+}
