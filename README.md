@@ -1,14 +1,7 @@
-# Player Trails
+# Racing Lines
 
-Draws Player Trails.
-Configurable in settings.
+Draws racing lines for players to follow.
 
 License: Public Domain
 
-Authors: XertroV
-
-Suggestions/feedback: @XertroV on Openplanet discord
-
-Code/issues: [https://github.com/XertroV/tm-player-trails](https://github.com/XertroV/tm-player-trails)
-
-GL HF
+Authors: Magisterex + (Thank you: XertroV & Miss)

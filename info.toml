@@ -1,9 +1,9 @@
 [meta]
-name     = "Player Trails"
-author   = "XertroV"
+name = "RacingLines"
+author = "Magisterex"
 category = "Race"
-version  = "0.1.2"
+version = "0.0.1"
 
 [script]
-#__DEFINES__
-dependencies = ["Camera", "VehicleState"]
+defines = [ "RELEASE" ]
+dependencies = [ "MLHook", "VehicleState", "Camera" ]
